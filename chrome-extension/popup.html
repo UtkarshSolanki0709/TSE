@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      width: 300px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      padding: 15px;
+      background: #0f172a;
+      color: white;
+    }
+    h2 { font-size: 1.2rem; margin-top: 0; color: #38bdf8; }
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #38bdf8;
+      border: none;
+      border-radius: 6px;
+      color: #0f172a;
+      font-weight: bold;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    button:hover { background: #7dd3fc; }
+    #status { font-size: 0.85rem; color: #94a3b8; }
+    .success { color: #4ade80 !important; }
+    .error { color: #f87171 !important; }
+  </style>
+</head>
+<body>
+  <h2>TSE Indexer</h2>
+  <p style="font-size: 0.9rem;">Index this page into your own search engine brain.</p>
+  <button id="indexBtn">Index Current Page</button>
+  <div id="status">Ready</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
