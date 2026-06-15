@@ -1,19 +1,19 @@
 import type { Document } from '@tse/shared';
 
 export class Brain {
-  private apiKey = process.env.OPENROUTER_API_KEY;
-  private model = "nvidia/nemotron-3-super-120b-a12b:free";
+  private get apiKey() { return process.env.NVIDIA_API_KEY; }
+  private baseURL = 'https://integrate.api.nvidia.com/v1';
+  private model = 'minimaxai/minimax-m3';
+  private timeoutMs = 60000;
 
-  /**
-   * Generates a "meaningful" answer based on search results.
-   */
   async synthesizeSearch(query: string, results: Document[]): Promise<{ answer: string; reasoning?: any }> {
     if (!this.apiKey) {
-      throw new Error("OpenRouter API key not configured");
+      console.error('[Brain] NVIDIA_API_KEY is not set. Loaded env keys:', Object.keys(process.env).filter(k => k.includes('NVIDIA')));
+      return { answer: 'AI synthesis unavailable — NVIDIA_API_KEY not configured.' };
     }
 
     const context = results.map(r => `[Source: ${r.url}]\n${r.content.substring(0, 1000)}`).join('\n\n');
-    
+
     const messages = [
       {
         role: 'system',
@@ -26,34 +26,56 @@ export class Brain {
     ];
 
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
         headers: {
-          "Authorization": `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json"
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: JSON.stringify({
-          "model": this.model,
-          "messages": messages,
-          "reasoning": { "enabled": true }
-        })
+          model: this.model,
+          messages,
+          temperature: 1.0,
+          top_p: 0.95,
+          max_tokens: 8192,
+          stream: false,
+        }),
+        signal: controller.signal,
       });
 
-      const result = await response.json();
-      
-      if (result.error) {
-        throw new Error(result.error.message || "OpenRouter error");
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => 'Unknown error');
+        console.error(`NVIDIA API error ${response.status}:`, errText);
+        return { answer: `AI synthesis failed (${response.status}). ${response.status === 429 ? 'Rate limited.' : 'Try again.'}` };
       }
 
-      const message = result.choices[0].message;
-      
+      const result = await response.json();
+
+      if (result.error) {
+        return { answer: `AI synthesis error: ${result.error.message || 'Unknown'}` };
+      }
+
+      const message = result.choices?.[0]?.message;
+      if (!message?.content) {
+        return { answer: 'AI synthesis returned empty response.' };
+      }
+
       return {
         answer: message.content,
-        reasoning: message.reasoning_details
+        reasoning: message.reasoning_details || message.reasoning_content
       };
-    } catch (error) {
-      console.error("Brain synthesis error:", error);
-      return { answer: "I'm sorry, I couldn't synthesize an answer right now." };
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        return { answer: 'AI synthesis timed out (60s limit). The model may be overloaded.' };
+      }
+      console.error('Brain synthesis error:', error.message || error);
+      return { answer: 'AI synthesis failed. Check server logs.' };
     }
   }
 }

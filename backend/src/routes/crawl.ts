@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { crawler } from '../services/crawler';
 import { indexer } from '../services/indexer';
 import * as storage from '../services/storage';
@@ -6,6 +7,18 @@ import { Server } from 'socket.io';
 import type { CrawlProgress } from '@tse/shared';
 import pLimit from 'p-limit';
 import crypto from 'crypto';
+
+const crawlSchema = z.object({
+  url: z.string().url().max(2048),
+  depth: z.number().int().min(1).max(3).optional().default(1),
+  browser: z.boolean().optional().default(false),
+});
+
+const directSchema = z.object({
+  url: z.string().url().max(2048),
+  title: z.string().max(500).optional(),
+  content: z.string().min(1).max(500000),
+});
 
 const router = Router();
 let io: Server;
@@ -22,13 +35,12 @@ const emitProgress = (progress: CrawlProgress) => {
  * Trigger a crawl for a specific URL
  */
 router.post('/', async (req, res) => {
-  const { url, depth = 1 } = req.body;
-
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
+  const parsed = crawlSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() });
   }
 
-  console.log(`Starting crawl for: ${url} (depth: ${depth})`);
+  const { url, depth, browser } = parsed.data;
 
   try {
     const visited = new Set<string>();
@@ -55,8 +67,6 @@ router.post('/', async (req, res) => {
       const batchSize = Math.min(queue.length, 5);
       const batch = queue.splice(0, batchSize);
 
-      console.log(`Processing batch of ${batch.length} URLs. Queue remaining: ${queue.length}`);
-
       await Promise.all(batch.map(item => limit(async () => {
         if (docsCrawled >= MAX_PAGES) return;
 
@@ -64,10 +74,8 @@ router.post('/', async (req, res) => {
         if (visited.has(currentUrl)) return;
         visited.add(currentUrl);
 
-        console.log(`[${docsCrawled + 1}/${MAX_PAGES}] Crawling: ${currentUrl}`);
+        const { doc, links } = await crawler.crawl(currentUrl, browser);
 
-        const { doc, links } = await crawler.crawl(currentUrl);
-        
         if (doc) {
           await indexer.indexDocument(doc);
           docsCrawled++;
@@ -99,8 +107,6 @@ router.post('/', async (req, res) => {
       })));
     }
 
-    console.log(`Crawl finished. Indexed ${docsCrawled} pages.`);
-
     const finalProgress: CrawlProgress = {
       status: 'done',
       url,
@@ -127,11 +133,12 @@ router.post('/', async (req, res) => {
  * Direct index from extension
  */
 router.post('/direct', async (req, res) => {
-  const { url, title, content } = req.body;
-
-  if (!url || !content) {
-    return res.status(400).json({ error: 'URL and content are required' });
+  const parsed = directSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() });
   }
+
+  const { url, title, content } = parsed.data;
 
   try {
     const doc = {

@@ -1,11 +1,8 @@
-/**
- * Calculates the Levenshtein distance between two strings using dynamic programming.
- * Matrix-based approach (built from scratch per PRD specification).
- */
+
 export function levenshteinDistance(a: string, b: string): number {
   const matrix: number[][] = [];
 
-  // Initialize first row and column
+  
   for (let i = 0; i <= a.length; i++) {
     matrix[i] = [i];
   }
@@ -13,16 +10,16 @@ export function levenshteinDistance(a: string, b: string): number {
     matrix[0][j] = j;
   }
 
-  // Fill the matrix
+  
   for (let i = 1; i <= a.length; i++) {
     for (let j = 1; j <= b.length; j++) {
       if (a[i - 1] === b[j - 1]) {
         matrix[i][j] = matrix[i - 1][j - 1];
       } else {
         matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // substitution
-          matrix[i][j - 1] + 1,     // insertion
-          matrix[i - 1][j] + 1      // deletion
+          matrix[i - 1][j - 1] + 1, 
+          matrix[i][j - 1] + 1,     
+          matrix[i - 1][j] + 1      
         );
       }
     }
@@ -31,9 +28,7 @@ export function levenshteinDistance(a: string, b: string): number {
   return matrix[a.length][b.length];
 }
 
-/**
- * Finds the closest matching term from the vocabulary based on Levenshtein distance.
- */
+
 export function getSuggestion(term: string, vocabulary: string[], maxDistance = 2): string | null {
   if (term.length < 3) return null;
   

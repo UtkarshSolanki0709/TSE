@@ -3,9 +3,8 @@ import path from 'path';
 import fs from 'fs';
 import type { Document, InvertedIndex, SearchLog } from '@tse/shared';
 
-// ─── Paths ────────────────────────────────────────────────────────────────────
 
-const DATA_DIR = path.resolve(process.cwd(), '.data');
+const DATA_DIR = path.resolve(__dirname, '..', '..', '.data');
 const DB_FILE = path.join(DATA_DIR, 'tse.db');
 
 if (!fs.existsSync(DATA_DIR)) {
@@ -16,9 +15,7 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const db = new sqlite3.Database(DB_FILE);
 
-/**
- * Promisified DB wrapper
- */
+
 const query = (sql: string, params: any[] = []): Promise<any[]> => {
   return new Promise((resolve, reject) => {
     db.all(sql, params, (err, rows) => {
@@ -57,6 +54,7 @@ export async function initDb() {
       url TEXT UNIQUE,
       title TEXT,
       content TEXT,
+      docLength INTEGER DEFAULT 0,
       timestamp INTEGER
     )
   `);
@@ -96,15 +94,17 @@ export async function getDocByUrl(url: string): Promise<Document | undefined> {
   return await getOne('SELECT * FROM documents WHERE url = ?', [url]);
 }
 
-export async function upsertDoc(doc: Document): Promise<void> {
+export async function upsertDoc(doc: Document & { docLength?: number }): Promise<void> {
+  const len = doc.docLength || 0;
   await run(
-    `INSERT INTO documents (id, url, title, content, timestamp) 
-     VALUES (?, ?, ?, ?, ?) 
+    `INSERT INTO documents (id, url, title, content, docLength, timestamp) 
+     VALUES (?, ?, ?, ?, ?, ?) 
      ON CONFLICT(url) DO UPDATE SET 
        title=excluded.title, 
        content=excluded.content, 
+       docLength=excluded.docLength,
        timestamp=excluded.timestamp`,
-    [doc.id, doc.url, doc.title, doc.content, doc.timestamp]
+    [doc.id, doc.url, doc.title, doc.content, len, doc.timestamp]
   );
 }
 
@@ -152,6 +152,10 @@ export async function batchSaveTermWeights(entries: { term: string; docId: strin
       });
     });
   });
+}
+
+export async function getIndexRows(): Promise<{ term: string; docId: string; weight: number }[]> {
+  return await query('SELECT term, docId, weight FROM inverted_index');
 }
 
 export async function getIndex(): Promise<InvertedIndex> {

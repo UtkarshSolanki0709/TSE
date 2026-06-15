@@ -9,6 +9,7 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "axios": "^1.7.7",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
@@ -16,8 +17,11 @@
     "express": "^5.0.0",
     "express-rate-limit": "^7.4.1",
     "helmet": "^8.0.0",
+    "jsdom": "^29.1.1",
     "natural": "^8.0.1",
+    "openai": "^6.42.0",
     "p-limit": "^3.1.0",
+    "playwright": "^1.61.0",
     "robots-parser": "^3.0.1",
     "socket.io": "^4.8.3",
     "sqlite3": "^5.1.7",
@@ -27,6 +31,7 @@
     "@tse/shared": "*",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/jsdom": "^28.0.3",
     "@types/natural": "^5.1.5",
     "@types/node": "^25.6.0",
     "nodemon": "^3.1.7",

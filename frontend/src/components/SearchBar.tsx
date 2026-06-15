@@ -2,15 +2,18 @@ import { Search, Loader2, Globe, Layers, Sparkles } from 'lucide-react';
 import { useSearchStore } from '../store/useSearchStore';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 export const SearchBar: React.FC = () => {
-  const { query, setQuery, performSearch, performCrawl, loading, crawlDepth, setCrawlDepth, mode, setMode } = useSearchStore();
+  const { query, setQuery, performSearch, performCrawl, loading, crawlDepth, setCrawlDepth, mode, setMode, autocomplete, fetchSuggestions } = useSearchStore();
   const [isCrawlMode, setIsCrawlMode] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,9 +41,22 @@ export const SearchBar: React.FC = () => {
           </div>
           
           <input
+            ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (!isCrawlMode) {
+                setShowSuggestions(true);
+                clearTimeout(debounceRef.current);
+                debounceRef.current = setTimeout(() => fetchSuggestions(e.target.value), 150);
+              }
+            }}
+            onFocus={() => !isCrawlMode && query && setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setShowSuggestions(false);
+            }}
             placeholder={isCrawlMode ? "Enter URL to crawl (e.g. https://example.com)..." : "Search query..."}
             className="w-full bg-transparent border-none focus:ring-0 text-white placeholder-white/30 px-4 py-4 text-lg outline-none"
           />
@@ -58,6 +74,26 @@ export const SearchBar: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {showSuggestions && autocomplete.length > 0 && !isCrawlMode && (
+        <div className="relative -mt-4 z-50">
+          <div className="absolute w-full bg-zinc-900 border border-white/10 rounded-xl overflow-hidden shadow-2xl">
+            {autocomplete.map((word) => (
+              <button
+                key={word}
+                onMouseDown={() => {
+                  setQuery(word);
+                  setShowSuggestions(false);
+                  performSearch(word);
+                }}
+                className="w-full text-left px-4 py-2.5 text-sm text-white/70 hover:bg-white/10 hover:text-white transition-colors font-mono"
+              >
+                {word}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col items-center gap-6">
         <div className="flex justify-center gap-4 text-sm">

@@ -41,3 +41,9 @@ export async function getAnalyticsGaps(): Promise<string[]> {
   if (!response.ok) throw new Error('Failed to fetch analytics gaps');
   return response.json();
 }
+
+export async function suggest(prefix: string): Promise<string[]> {
+  const response = await fetch(`${API_BASE}/search/suggest?q=${encodeURIComponent(prefix)}`);
+  if (!response.ok) return [];
+  return response.json();
+}

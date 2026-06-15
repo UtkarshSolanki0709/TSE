@@ -6,7 +6,6 @@ import { io } from 'socket.io-client';
 const socket = io('http://localhost:3000');
 
 interface SearchState {
-  // State
   query: string;
   mode: SearchMode;
   results: SearchResult[];
@@ -20,14 +19,15 @@ interface SearchState {
   crawlDepth: number;
   crawlProgress: CrawlProgress | null;
   brainOutput: { answer: string; reasoning?: unknown } | null;
+  autocomplete: string[];
 
-  // Actions
   setQuery: (q: string) => void;
   setMode: (mode: SearchMode) => void;
   setCrawlDepth: (depth: number) => void;
   performSearch: (q?: string) => Promise<void>;
   performCrawl: (url: string) => Promise<void>;
   fetchAnalytics: () => Promise<void>;
+  fetchSuggestions: (prefix: string) => Promise<void>;
   initSocket: () => void;
 }
 
@@ -45,6 +45,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   analytics: [],
   gaps: [],
   brainOutput: null,
+  autocomplete: [],
 
   setQuery: (query) => set({ query }),
   setMode: (mode) => set({ mode }),
@@ -107,5 +108,14 @@ export const useSearchStore = create<SearchState>((set, get) => ({
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
     }
+  },
+
+  fetchSuggestions: async (prefix) => {
+    if (prefix.length < 1) {
+      set({ autocomplete: [] });
+      return;
+    }
+    const words = await api.suggest(prefix);
+    set({ autocomplete: words.slice(0, 8) });
   }
 }));
