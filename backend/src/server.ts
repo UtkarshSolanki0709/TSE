@@ -12,6 +12,7 @@ import http from 'http';
 import crawlRouter, { setupCrawlSocket } from './routes/crawl';
 import searchRouter from './routes/search';
 import analyticsRouter from './routes/analytics';
+import scrapedRouter from './routes/scraped';
 
 import { initDb } from './services/storage';
 import { indexCache } from './services/indexCache';
@@ -56,6 +57,7 @@ const crawlLimiter = rateLimit({
 app.use('/crawl', crawlLimiter, crawlRouter);
 app.use('/search', searchRouter);
 app.use('/analytics', analyticsRouter);
+app.use('/api/scraped', scrapedRouter);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });

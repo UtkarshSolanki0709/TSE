@@ -74,11 +74,26 @@ router.post('/', async (req, res) => {
         if (visited.has(currentUrl)) return;
         visited.add(currentUrl);
 
-        const { doc, links } = await crawler.crawl(currentUrl, browser);
+        const { doc, links, classification, structuredData, rawHtml } = await crawler.crawl(currentUrl, browser);
 
         if (doc) {
           await indexer.indexDocument(doc);
           docsCrawled++;
+
+          try {
+            await storage.saveScrapedTree({
+              url: currentUrl,
+              title: doc.title,
+              classification,
+              timestamp: doc.timestamp,
+              statusCode: 200,
+              rawHtml,
+              content: doc.content,
+              structuredData,
+            });
+          } catch (storageError) {
+            console.error(`Failed to save scraped tree for ${currentUrl}:`, storageError);
+          }
 
           const sampleTerms = doc.content.split(/\s+/).slice(10, 15).filter(t => t.length > 3);
 

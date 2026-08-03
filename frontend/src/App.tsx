@@ -3,11 +3,13 @@ import { SearchBar } from './components/SearchBar';
 import { ResultCard } from './components/ResultCard';
 import { ZeroResultsState } from './components/ZeroResultsState';
 import { AnalyticsDashboard } from './pages/AnalyticsDashboard';
+import { ScrapedExplorer } from './pages/ScrapedExplorer';
+import { Markdown } from './components/Markdown';
 import { useSearchStore } from './store/useSearchStore';
 import { Database, Activity, Search, BarChart3, Cpu, Clock, Link, Hash, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-type View = 'search' | 'analytics';
+type View = 'search' | 'analytics' | 'scraped';
 
 function App() {
   const { results, total, loading, timeMs, query, suggestion, performSearch, crawlProgress, initSocket, brainOutput } = useSearchStore();
@@ -59,6 +61,15 @@ function App() {
             >
               <Search className="w-4 h-4" />
               Search
+            </button>
+            <button 
+              onClick={() => setView('scraped')}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                view === 'scraped' ? 'bg-white/10 text-white shadow-xl' : 'text-white/40 hover:text-white/60 hover:bg-white/5'
+              }`}
+            >
+              <Database className="w-4 h-4" />
+              Scraped Explorer
             </button>
             <button 
               onClick={() => setView('analytics')}
@@ -201,11 +212,11 @@ function App() {
                         <span>Brain Synthesis (Nemotron-3)</span>
                       </div>
                       
-                      <div className="text-xl text-white leading-relaxed font-medium">
-                        {brainOutput.answer}
+                      <div className="text-white leading-relaxed">
+                        <Markdown content={brainOutput.answer} />
                       </div>
 
-                      {brainOutput.reasoning && (
+                      {!!brainOutput.reasoning && (
                         <div className="pt-6 border-t border-purple-500/20">
                           <details className="group">
                             <summary className="text-purple-400/60 text-[10px] uppercase tracking-widest font-black cursor-pointer hover:text-purple-400 transition-colors list-none flex items-center gap-2">
@@ -266,6 +277,15 @@ function App() {
                   </div>
                 )}
               </div>
+            </motion.div>
+          ) : view === 'scraped' ? (
+            <motion.div
+              key="scraped-view"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <ScrapedExplorer />
             </motion.div>
           ) : (
             <motion.div

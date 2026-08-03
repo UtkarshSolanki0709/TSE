@@ -79,7 +79,8 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         loading: false 
       });
     } catch (e) {
-      set({ error: e.message, loading: false });
+      const message = e instanceof Error ? e.message : 'Search failed';
+      set({ error: message, loading: false });
     }
   },
 

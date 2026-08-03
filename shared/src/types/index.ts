@@ -6,6 +6,7 @@ export interface Document {
   title: string;
   content: string; // Raw plain text (stripped HTML)
   timestamp: number; // Unix ms
+  classification?: PageClassification;
 }
 
 // ─── Index ───────────────────────────────────────────────────────────────────
@@ -16,7 +17,7 @@ export type InvertedIndex = Record<string, Record<string, number>>;
 /** docId → { term → tf-idf weight } — for cosine similarity */
 export type TfIdfVectors = Record<string, Record<string, number>>;
 
-// ─── Crawl ───────────────────────────────────────────────────────────────────
+export type PageClassification = 'Product' | 'Article' | 'Listing' | 'General';
 
 export interface CrawlRequest {
   url: string;

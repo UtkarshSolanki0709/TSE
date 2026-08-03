@@ -1,6 +1,7 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import type { Document, InvertedIndex, SearchLog } from '@tse/shared';
 
 
@@ -78,6 +79,17 @@ export async function initDb() {
       timestamp INTEGER
     )
   `);
+
+  try {
+    await run(`ALTER TABLE documents ADD COLUMN docLength INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column probably already exists
+  }
+  try {
+    await run(`ALTER TABLE documents ADD COLUMN classification TEXT DEFAULT 'General'`);
+  } catch (e) {
+    // Column probably already exists
+  }
 }
 
 // ─── Documents ───────────────────────────────────────────────────────────────
@@ -96,15 +108,17 @@ export async function getDocByUrl(url: string): Promise<Document | undefined> {
 
 export async function upsertDoc(doc: Document & { docLength?: number }): Promise<void> {
   const len = doc.docLength || 0;
+  const classification = doc.classification || 'General';
   await run(
-    `INSERT INTO documents (id, url, title, content, docLength, timestamp) 
-     VALUES (?, ?, ?, ?, ?, ?) 
+    `INSERT INTO documents (id, url, title, content, docLength, timestamp, classification) 
+     VALUES (?, ?, ?, ?, ?, ?, ?) 
      ON CONFLICT(url) DO UPDATE SET 
        title=excluded.title, 
        content=excluded.content, 
        docLength=excluded.docLength,
-       timestamp=excluded.timestamp`,
-    [doc.id, doc.url, doc.title, doc.content, len, doc.timestamp]
+       timestamp=excluded.timestamp,
+       classification=excluded.classification`,
+    [doc.id, doc.url, doc.title, doc.content, len, doc.timestamp, classification]
   );
 }
 
@@ -214,6 +228,80 @@ export async function getDocCount(): Promise<number> {
 export async function getTermDocCount(term: string): Promise<number> {
   const row = await getOne('SELECT COUNT(*) as count FROM inverted_index WHERE term = ?', [term]);
   return row?.count || 0;
+}
+
+// ─── Scraped Filesystem Tree Storage ─────────────────────────────────────────
+
+export function sanitizePathSegment(segment: string): string {
+  // Remove characters that are illegal in file names across Windows/Linux:
+  // \ / : * ? " < > |
+  let sanitized = segment.replace(/[\\/:*?"<>|]/g, '_');
+  // Truncate to maximum of 50 characters to prevent path length limits on Windows (MAX_PATH is 260)
+  if (sanitized.length > 50) {
+    sanitized = sanitized.substring(0, 50);
+  }
+  return sanitized || '_';
+}
+
+export function getScrapedDirPath(urlStr: string): string {
+  try {
+    const url = new URL(urlStr);
+    const domain = sanitizePathSegment(url.hostname);
+    
+    // Split the pathname by slashes and filter empty segments
+    const segments = url.pathname.split('/').map(s => s.trim()).filter(Boolean);
+    const sanitizedSegments = segments.map(sanitizePathSegment);
+    
+    if (sanitizedSegments.length === 0) {
+      sanitizedSegments.push('_root');
+    }
+    
+    return path.join(DATA_DIR, 'scraped', domain, ...sanitizedSegments);
+  } catch (e) {
+    const hash = crypto.createHash('md5').update(urlStr).digest('hex');
+    return path.join(DATA_DIR, 'scraped', '_invalid_url', hash);
+  }
+}
+
+export interface ScrapedArtifacts {
+  url: string;
+  title: string;
+  classification: string;
+  timestamp: number;
+  statusCode: number;
+  rawHtml: string;
+  content: string;
+  structuredData: any;
+}
+
+export async function saveScrapedTree(artifacts: ScrapedArtifacts): Promise<string> {
+  const dirPath = getScrapedDirPath(artifacts.url);
+  
+  // Ensure target directory exists
+  await fs.promises.mkdir(dirPath, { recursive: true });
+  
+  // 1. Write raw.html
+  await fs.promises.writeFile(path.join(dirPath, 'raw.html'), artifacts.rawHtml || '', 'utf-8');
+  
+  // 2. Write content.txt
+  await fs.promises.writeFile(path.join(dirPath, 'content.txt'), artifacts.content || '', 'utf-8');
+  
+  // 3. Write metadata.json
+  const metadata = {
+    url: artifacts.url,
+    hostname: new URL(artifacts.url).hostname,
+    title: artifacts.title,
+    classification: artifacts.classification,
+    timestamp: artifacts.timestamp,
+    statusCode: artifacts.statusCode,
+  };
+  await fs.promises.writeFile(path.join(dirPath, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf-8');
+  
+  // 4. Write data.json
+  const data = artifacts.structuredData || {};
+  await fs.promises.writeFile(path.join(dirPath, 'data.json'), JSON.stringify(data, null, 2), 'utf-8');
+  
+  return dirPath;
 }
 
 
