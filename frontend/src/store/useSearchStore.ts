@@ -118,13 +118,13 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         brainOutput: response.brainOutput || null,
         loading: false 
       });
-    } catch (e: any) {
-      if (e.message === 'UNAUTHORIZED') {
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Search failed';
+      if (message === 'UNAUTHORIZED') {
         useAuthStore.getState().logout();
         window.location.href = '/login';
         return;
       }
-      const message = e instanceof Error ? e.message : 'Search failed';
       set({ error: message, loading: false });
     }
   },
@@ -138,13 +138,13 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         depth: get().crawlDepth 
       });
       set({ loading: false });
-    } catch (e: any) {
-      if (e.message === 'UNAUTHORIZED') {
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Crawl failed';
+      if (message === 'UNAUTHORIZED') {
         useAuthStore.getState().logout();
         window.location.href = '/login';
         return;
       }
-      const message = e instanceof Error ? e.message : 'Crawl failed';
       set({ error: message, loading: false });
     }
   },
@@ -156,8 +156,8 @@ export const useSearchStore = create<SearchState>((set, get) => ({
          api.getAnalyticsGaps()
        ]);
        set({ analytics: stats, gaps });
-    } catch (e: any) {
-       if (e.message === 'UNAUTHORIZED') {
+    } catch (e: unknown) {
+       if (e instanceof Error && e.message === 'UNAUTHORIZED') {
          useAuthStore.getState().logout();
          window.location.href = '/login';
          return;

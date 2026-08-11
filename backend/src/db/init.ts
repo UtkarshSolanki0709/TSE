@@ -5,7 +5,10 @@ async function exec(rawSql: string): Promise<void> {
   const db = getDb();
   const mode = getMode();
   if (mode === 'cloud') {
-    const pgSql = rawSql.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+    const pgSql = rawSql
+      .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY')
+      .replace(/created_at INTEGER/gi, 'created_at BIGINT')
+      .replace(/timestamp INTEGER/gi, 'timestamp BIGINT');
     await db.execute(sql.raw(pgSql));
   } else {
     // better-sqlite3 Drizzle instance requires sql.raw()
@@ -14,13 +17,16 @@ async function exec(rawSql: string): Promise<void> {
 }
 
 async function runInit(): Promise<void> {
+  const db = getDb();
+  const mode = getMode();
+
   await exec(`CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT,
     oauth_provider TEXT,
     oauth_id TEXT,
-    created_at INTEGER NOT NULL
+    created_at BIGINT NOT NULL
   )`);
 
   await exec(`CREATE TABLE IF NOT EXISTS documents (
@@ -30,17 +36,24 @@ async function runInit(): Promise<void> {
     title TEXT NOT NULL,
     content TEXT NOT NULL,
     doc_length INTEGER NOT NULL DEFAULT 0,
-    timestamp INTEGER NOT NULL,
+    timestamp BIGINT NOT NULL,
     classification TEXT NOT NULL DEFAULT 'General',
     UNIQUE(user_id, url)
   )`);
 
-  // Legacy camelCase column migrations for SQLite databases created under earlier schemas
-  try { await exec(`ALTER TABLE inverted_index RENAME COLUMN docId TO doc_id`); } catch {}
-  try { await exec(`ALTER TABLE search_logs RENAME COLUMN resultCount TO result_count`); } catch {}
-  try { await exec(`ALTER TABLE search_logs RENAME COLUMN responseMs TO response_ms`); } catch {}
-  try { await exec(`ALTER TABLE documents RENAME COLUMN docLength TO doc_length`); } catch {}
-  try { await exec(`ALTER TABLE documents DROP COLUMN docLength`); } catch {}
+  if (mode === 'cloud') {
+    try { await db.execute(sql.raw(`ALTER TABLE users ALTER COLUMN created_at TYPE BIGINT`)); } catch {}
+    try { await db.execute(sql.raw(`ALTER TABLE documents ALTER COLUMN timestamp TYPE BIGINT`)); } catch {}
+    try { await db.execute(sql.raw(`ALTER TABLE search_logs ALTER COLUMN timestamp TYPE BIGINT`)); } catch {}
+    try { await db.execute(sql.raw(`ALTER TABLE crawl_failures ALTER COLUMN timestamp TYPE BIGINT`)); } catch {}
+  } else {
+    // Legacy camelCase column migrations for SQLite databases created under earlier schemas
+    try { await exec(`ALTER TABLE inverted_index RENAME COLUMN docId TO doc_id`); } catch {}
+    try { await exec(`ALTER TABLE search_logs RENAME COLUMN resultCount TO result_count`); } catch {}
+    try { await exec(`ALTER TABLE search_logs RENAME COLUMN responseMs TO response_ms`); } catch {}
+    try { await exec(`ALTER TABLE documents RENAME COLUMN docLength TO doc_length`); } catch {}
+    try { await exec(`ALTER TABLE documents DROP COLUMN docLength`); } catch {}
+  }
 
   try { await exec(`ALTER TABLE documents ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'`); } catch {}
   try { await exec(`ALTER TABLE documents ADD COLUMN doc_length INTEGER NOT NULL DEFAULT 0`); } catch {}
@@ -67,7 +80,7 @@ async function runInit(): Promise<void> {
     query TEXT NOT NULL,
     result_count INTEGER NOT NULL,
     response_ms INTEGER NOT NULL,
-    timestamp INTEGER NOT NULL
+    timestamp BIGINT NOT NULL
   )`);
 
   try { await exec(`ALTER TABLE search_logs ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'`); } catch {}
@@ -81,7 +94,7 @@ async function runInit(): Promise<void> {
     reason TEXT NOT NULL,
     status_code INTEGER,
     retry_count INTEGER NOT NULL DEFAULT 0,
-    timestamp INTEGER NOT NULL
+    timestamp BIGINT NOT NULL
   )`);
 
   try { await exec(`ALTER TABLE crawl_failures ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'`); } catch {}

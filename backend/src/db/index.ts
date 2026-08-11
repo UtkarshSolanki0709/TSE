@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { drizzle as sqliteDrizzle } from 'drizzle-orm/better-sqlite3';
-import { drizzle as neonDrizzle } from 'drizzle-orm/neon-http';
-import { neon } from '@neondatabase/serverless';
+import { drizzle as pgDrizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
 import path from 'path';
 import fs from 'fs';
 
@@ -21,8 +21,13 @@ export function getDb(): DB {
 
   if (_mode === 'cloud') {
     const connectionString = process.env.DATABASE_URL || '';
-    const client = neon(connectionString);
-    _db = neonDrizzle({ client });
+    const pool = new Pool({
+      connectionString,
+      ssl: connectionString.includes('localhost') || connectionString.includes('127.0.0.1')
+        ? false
+        : { rejectUnauthorized: false },
+    });
+    _db = pgDrizzle(pool);
   } else {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     const sqlite = new Database(DB_FILE);

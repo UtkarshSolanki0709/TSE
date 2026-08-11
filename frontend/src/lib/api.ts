@@ -13,6 +13,29 @@ function getHeaders(): Record<string, string> {
   return headers;
 }
 
+async function parseJsonResponse<T>(response: Response, defaultError = 'Request failed'): Promise<T> {
+  const contentType = response.headers.get('content-type') || '';
+
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('UNAUTHORIZED');
+
+    if (contentType.includes('application/json')) {
+      try {
+        const data = await response.json();
+        throw new Error(data.error || data.message || defaultError);
+      } catch (e: unknown) {
+        if (e instanceof Error && e.message !== defaultError) throw e;
+      }
+    }
+
+    const text = await response.text();
+    const cleanMsg = text.replace(/<[^>]*>/g, '').trim();
+    throw new Error(cleanMsg || `${defaultError} (${response.status})`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 export async function search(params: SearchQuery & { insightKey?: string; insightProvider?: string; insightModel?: string }): Promise<SearchResponse> {
   const query = new URLSearchParams({
     q: params.q,
@@ -28,11 +51,7 @@ export async function search(params: SearchQuery & { insightKey?: string; insigh
   }
 
   const response = await fetch(`${API_BASE}/search?${query}`, { headers });
-  if (!response.ok) {
-    if (response.status === 401) throw new Error('UNAUTHORIZED');
-    throw new Error('Search failed');
-  }
-  return response.json();
+  return parseJsonResponse<SearchResponse>(response, 'Search failed');
 }
 
 export async function crawl(params: CrawlRequest): Promise<CrawlResult> {
@@ -42,36 +61,29 @@ export async function crawl(params: CrawlRequest): Promise<CrawlResult> {
     body: JSON.stringify(params),
   });
 
-  const data = await response.json();
-  if (!response.ok) {
-    if (response.status === 401) throw new Error('UNAUTHORIZED');
-    throw new Error(data.error || 'Crawl failed');
-  }
-  return data.result;
+  const data = await parseJsonResponse<{ result?: CrawlResult; error?: string }>(response, 'Crawl failed');
+  if (data.result) return data.result;
+  throw new Error(data.error || 'Crawl failed');
 }
 
 export async function getAnalytics(): Promise<SearchAnalytics[]> {
   const response = await fetch(`${API_BASE}/analytics`, { headers: getHeaders() });
-  if (!response.ok) {
-    if (response.status === 401) throw new Error('UNAUTHORIZED');
-    throw new Error('Failed to fetch analytics');
-  }
-  return response.json();
+  return parseJsonResponse<SearchAnalytics[]>(response, 'Failed to fetch analytics');
 }
 
 export async function getAnalyticsGaps(): Promise<string[]> {
   const response = await fetch(`${API_BASE}/analytics/gaps`, { headers: getHeaders() });
-  if (!response.ok) {
-    if (response.status === 401) throw new Error('UNAUTHORIZED');
-    throw new Error('Failed to fetch analytics gaps');
-  }
-  return response.json();
+  return parseJsonResponse<string[]>(response, 'Failed to fetch analytics gaps');
 }
 
 export async function suggest(prefix: string): Promise<string[]> {
   const response = await fetch(`${API_BASE}/search/suggest?q=${encodeURIComponent(prefix)}`, { headers: getHeaders() });
   if (!response.ok) return [];
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    return [];
+  }
 }
 
 export interface InsightProviderConfig {
@@ -86,7 +98,11 @@ export interface InsightProviderConfig {
 export async function getInsightProviders(): Promise<InsightProviderConfig[]> {
   const response = await fetch(`${API_BASE}/search/insight/providers`, { headers: getHeaders() });
   if (!response.ok) return [];
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    return [];
+  }
 }
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
@@ -102,11 +118,7 @@ export async function signup(email: string, password: string): Promise<AuthRespo
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
-  if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.error || 'Signup failed');
-  }
-  return response.json();
+  return parseJsonResponse<AuthResponse>(response, 'Signup failed');
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {
@@ -115,17 +127,12 @@ export async function login(email: string, password: string): Promise<AuthRespon
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
-  if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.error || 'Login failed');
-  }
-  return response.json();
+  return parseJsonResponse<AuthResponse>(response, 'Login failed');
 }
 
 export async function getMe(): Promise<{ id: string; email: string; createdAt: number }> {
   const response = await fetch(`${API_BASE}/auth/me`, { headers: getHeaders() });
-  if (!response.ok) throw new Error('Not authenticated');
-  return response.json();
+  return parseJsonResponse<{ id: string; email: string; createdAt: number }>(response, 'Not authenticated');
 }
 
 export function oauthLogin(provider: 'google' | 'github'): void {

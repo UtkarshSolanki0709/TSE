@@ -20,8 +20,8 @@ export function LoginPage() {
         : await api.login(email, password);
       setToken(res.token);
       window.location.href = '/search';
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
