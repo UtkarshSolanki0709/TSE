@@ -91,9 +91,11 @@ app.use('/api/rate-limit', requireAuth, rateLimitRouter);
 const frontendDistPath = path.resolve(__dirname, '..', '..', 'frontend', 'dist');
 if (fs.existsSync(frontendDistPath)) {
   app.use(express.static(frontendDistPath));
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/health') || req.path.startsWith('/socket.io')) return next();
-    res.sendFile(path.join(frontendDistPath, 'index.html'));
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/health') && !req.path.startsWith('/socket.io')) {
+      return res.sendFile(path.join(frontendDistPath, 'index.html'));
+    }
+    next();
   });
 }
 
