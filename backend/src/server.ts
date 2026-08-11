@@ -60,7 +60,6 @@ const handleHealthCheck = (req: express.Request, res: express.Response) => {
   res.status(200).json({ status: 'ok', storageMode: mode === 'cloud' ? 'cloud' : 'local-first', host: bindHost });
 };
 
-app.get('/', handleHealthCheck);
 app.get('/api/health', handleHealthCheck);
 app.get('/api/healthz', handleHealthCheck);
 app.get('/health', handleHealthCheck);
