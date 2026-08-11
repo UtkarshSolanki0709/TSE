@@ -24,19 +24,44 @@ import { getMode } from './db/index';
 const app = express();
 const server = http.createServer(app);
 
-const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
-const allowedOrigins = [corsOrigin, 'chrome-extension://*'];
+const getBaseUrl = () => process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || 'http://localhost:3000';
 
-const corsOptions = {
+const isOriginAllowed = (origin: string | undefined, host?: string): boolean => {
+  if (!origin) return true;
+  if (/^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return true;
+  if (origin.startsWith('chrome-extension://')) return true;
+
+  const allowedUrls = [
+    process.env.CORS_ORIGIN,
+    process.env.BASE_URL,
+    process.env.RENDER_EXTERNAL_URL,
+  ].filter(Boolean) as string[];
+
+  for (const allowed of allowedUrls) {
+    if (allowed.includes('*')) {
+      if (origin.startsWith(allowed.replace('*', ''))) return true;
+    } else if (origin === allowed) {
+      return true;
+    }
+  }
+
+  if (host && origin.includes(host)) return true;
+  if (origin.endsWith('.onrender.com')) return true;
+
+  return false;
+};
+
+const corsOptions: cors.CorsOptions = {
   origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.some(allowed => {
-      if (allowed.includes('*')) return origin.startsWith(allowed.replace('*', ''));
-      return origin === allowed;
-    })) return callback(null, true);
-    callback(new Error(`CORS blocked: ${origin}`));
+    if (isOriginAllowed(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
   },
-  methods: ['GET', 'POST'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-insight-key', 'x-insight-provider', 'x-insight-model'],
 };
 
 const io = new Server(server, { cors: corsOptions });
@@ -45,10 +70,26 @@ const PORT = process.env.PORT || 3000;
 const mode = getMode();
 const bindHost = mode === 'cloud' ? '0.0.0.0' : '127.0.0.1';
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://db.onlinewebfonts.com"],
+        fontSrc: ["'self'", "https://db.onlinewebfonts.com", "data:"],
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        mediaSrc: ["'self'", "https://assets.mixkit.co", "https://cdn.coverr.co", "https://d8j0ntlcm91z4.cloudfront.net", "blob:"],
+        connectSrc: ["'self'", "ws:", "wss:", "https:"],
+      },
+    },
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '1mb' }));
-app.use(globalLimiter);
 
 setupCrawlSocket(io);
 
@@ -65,7 +106,6 @@ app.get('/api/healthz', handleHealthCheck);
 app.get('/health', handleHealthCheck);
 app.get('/healthz', handleHealthCheck);
 
-
 app.get('/api/storage/info', (req, res) => {
   res.status(200).json({
     mode: mode === 'cloud' ? 'cloud' : 'local-first',
@@ -78,6 +118,9 @@ app.get('/api/storage/info', (req, res) => {
       : 'All scraped documents, inverted indexes, and logs are stored strictly on your local device.',
   });
 });
+
+// Apply rate limiter specifically to /api routes (not static assets)
+app.use('/api', globalLimiter);
 
 // Protected routes (auth required in cloud mode)
 app.use('/api/crawl', requireAuth, crawlLimiter, crawlRouter);

@@ -35,14 +35,21 @@ async function findOrCreateUser(email: string, provider: string, oauthId: string
   return { id, email, createdAt: Date.now() };
 }
 
+function getBaseUrl(): string {
+  return process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || 'http://localhost:3000';
+}
+
+function getFrontendUrl(): string {
+  return process.env.RENDER_EXTERNAL_URL || process.env.CORS_ORIGIN || process.env.BASE_URL || 'http://localhost:5173';
+}
+
 // ─── Google OAuth ────────────────────────────────────────────────────────────
 
 router.get('/google', (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) return res.status(500).json({ error: 'Google OAuth not configured' });
 
-  const base = process.env.BASE_URL || 'http://localhost:3000';
-  const redirectUri = base + '/api/auth/google/callback';
+  const redirectUri = getBaseUrl() + '/api/auth/google/callback';
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -68,7 +75,7 @@ router.get('/google/callback', async (req, res) => {
         code,
         client_id: process.env.GOOGLE_CLIENT_ID || '',
         client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
-        redirect_uri: (process.env.BASE_URL || 'http://localhost:3000') + '/api/auth/google/callback',
+        redirect_uri: getBaseUrl() + '/api/auth/google/callback',
         grant_type: 'authorization_code',
       }),
     });
@@ -86,8 +93,7 @@ router.get('/google/callback', async (req, res) => {
     const user = await findOrCreateUser(userData.email, 'google', userData.id);
     const token = issueToken(user.id);
 
-    const frontendUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
-    doRedirect(res, frontendUrl + '/auth/callback?token=' + token);
+    doRedirect(res, getFrontendUrl() + '/auth/callback?token=' + token);
   } catch (err) {
     console.error('Google OAuth error:', err);
     res.status(500).json({ error: 'OAuth failed' });
@@ -100,8 +106,7 @@ router.get('/github', (req, res) => {
   const clientId = process.env.GITHUB_CLIENT_ID;
   if (!clientId) return res.status(500).json({ error: 'GitHub OAuth not configured' });
 
-  const base = process.env.BASE_URL || 'http://localhost:3000';
-  const redirectUri = base + '/api/auth/github/callback';
+  const redirectUri = getBaseUrl() + '/api/auth/github/callback';
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -124,7 +129,7 @@ router.get('/github/callback', async (req, res) => {
         code,
         client_id: process.env.GITHUB_CLIENT_ID || '',
         client_secret: process.env.GITHUB_CLIENT_SECRET || '',
-        redirect_uri: (process.env.BASE_URL || 'http://localhost:3000') + '/api/auth/github/callback',
+        redirect_uri: getBaseUrl() + '/api/auth/github/callback',
       }),
     });
 
@@ -154,8 +159,7 @@ router.get('/github/callback', async (req, res) => {
     const user = await findOrCreateUser(email, 'github', String(userData.id));
     const token = issueToken(user.id);
 
-    const frontendUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
-    doRedirect(res, frontendUrl + '/auth/callback?token=' + token);
+    doRedirect(res, getFrontendUrl() + '/auth/callback?token=' + token);
   } catch (err) {
     console.error('GitHub OAuth error:', err);
     res.status(500).json({ error: 'OAuth failed' });
