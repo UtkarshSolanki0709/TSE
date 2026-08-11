@@ -110,8 +110,12 @@ export function BoomerangVideoBg() {
     offscreen.height = h;
     const ctx = offscreen.getContext('2d');
     if (ctx) {
-      ctx.drawImage(video, 0, 0, w, h);
-      framesRef.current.push(offscreen);
+      try {
+        ctx.drawImage(video, 0, 0, w, h);
+        framesRef.current.push(offscreen);
+      } catch (err) {
+        console.warn('Canvas frame capture bypassed:', err);
+      }
     }
   }, []);
 
