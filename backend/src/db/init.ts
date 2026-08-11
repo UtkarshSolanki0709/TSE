@@ -13,7 +13,7 @@ async function exec(rawSql: string): Promise<void> {
   }
 }
 
-export async function initDb(): Promise<void> {
+async function runInit(): Promise<void> {
   await exec(`CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
@@ -70,4 +70,17 @@ export async function initDb(): Promise<void> {
   )`);
 
   await exec(`CREATE INDEX IF NOT EXISTS cf_user_idx ON crawl_failures(user_id)`);
+}
+
+export async function initDb(retries = 3): Promise<void> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await runInit();
+      return;
+    } catch (err) {
+      if (attempt === retries) throw err;
+      console.warn(`Database init attempt ${attempt} failed, retrying in 2 seconds...`);
+      await new Promise(res => setTimeout(res, 2000));
+    }
+  }
 }
