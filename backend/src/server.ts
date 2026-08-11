@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 import express from 'express';
@@ -59,6 +60,7 @@ const handleHealthCheck = (req: express.Request, res: express.Response) => {
   res.status(200).json({ status: 'ok', storageMode: mode === 'cloud' ? 'cloud' : 'local-first', host: bindHost });
 };
 
+app.get('/', handleHealthCheck);
 app.get('/api/health', handleHealthCheck);
 app.get('/api/healthz', handleHealthCheck);
 app.get('/health', handleHealthCheck);
@@ -84,6 +86,16 @@ app.use('/api/search', requireAuth, searchLimiter, searchRouter);
 app.use('/api/analytics', requireAuth, analyticsRouter);
 app.use('/api/scraped', requireAuth, scrapedRouter);
 app.use('/api/rate-limit', requireAuth, rateLimitRouter);
+
+// Serve frontend React static assets if built
+const frontendDistPath = path.resolve(__dirname, '..', '..', 'frontend', 'dist');
+if (fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/health') || req.path.startsWith('/socket.io')) return next();
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+}
 
 initDb().then(async () => {
   await indexCache.init();
