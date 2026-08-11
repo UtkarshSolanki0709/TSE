@@ -1,24 +1,44 @@
 import type { Document } from '@tse/shared';
 import * as storage from './storage';
 
+// ponytail: per-user cache. In cloud mode, each user has isolated data.
+// Local mode uses single "local" userId, so cache behaves as before.
+
 export class IndexCache {
-  terms = new Map<string, Map<string, number>>();
-  docs = new Map<string, Document>();
-  vocabulary = new Set<string>();
-  totalDocs = 0;
-  avgDocLength = 0;
+  private terms = new Map<string, Map<string, number>>();
+  private docs = new Map<string, Document>();
+  private vocabulary = new Set<string>();
+  private totalDocs = 0;
+  private avgDocLength = 0;
+  private loadedUserId: string | null = null;
 
   async init(): Promise<void> {
+    const mode = process.env.MODE || 'local';
+    if (mode === 'local') {
+      await this.loadUser('local');
+    }
+  }
+
+  async loadUser(userId: string): Promise<void> {
+    if (this.loadedUserId === userId) return;
+
+    // ponytail: clear and reload. For multi-user cloud, this means cache
+    // only holds one user's data at a time. LRU for multiple users later.
+    this.terms.clear();
+    this.docs.clear();
+    this.vocabulary.clear();
+    this.totalDocs = 0;
+    this.avgDocLength = 0;
+
     const [allDocs, indexRows] = await Promise.all([
-      storage.getDocs(),
-      storage.getIndexRows(),
+      storage.getDocs(userId),
+      storage.getIndexRows(userId),
     ]);
 
     let totalLength = 0;
     for (const doc of allDocs) {
       this.docs.set(doc.id, doc);
-      const len = this.tokenCount(doc.content);
-      totalLength += len;
+      totalLength += this.tokenCount(doc.content);
     }
 
     this.totalDocs = allDocs.length;
@@ -31,9 +51,12 @@ export class IndexCache {
       this.terms.get(row.term)!.set(row.docId, row.weight);
       this.vocabulary.add(row.term);
     }
+
+    this.loadedUserId = userId;
   }
 
-  getTermWeights(term: string): Map<string, number> | undefined {
+  getTermWeights(userId: string, term: string): Map<string, number> | undefined {
+    if (this.loadedUserId !== userId) return undefined;
     return this.terms.get(term);
   }
 
@@ -56,22 +79,8 @@ export class IndexCache {
     this.vocabulary.add(term);
   }
 
-  removeDoc(docId: string): void {
-    const doc = this.docs.get(docId);
-    if (!doc) return;
-
-    this.docs.delete(docId);
-    this.totalDocs--;
-
-    for (const [term, docMap] of this.terms) {
-      if (docMap.delete(docId) && docMap.size === 0) {
-        this.terms.delete(term);
-        this.vocabulary.delete(term);
-      }
-    }
-  }
-
-  getSuggestions(prefix: string, max = 10): string[] {
+  getSuggestions(userId: string, prefix: string, max = 10): string[] {
+    if (this.loadedUserId !== userId) return [];
     const lower = prefix.toLowerCase();
     const matches: string[] = [];
     for (const word of this.vocabulary) {
@@ -81,6 +90,21 @@ export class IndexCache {
       }
     }
     return matches;
+  }
+
+  getVocabulary(userId: string): Set<string> {
+    if (this.loadedUserId !== userId) return new Set();
+    return this.vocabulary;
+  }
+
+  getTotalDocs(userId: string): number {
+    if (this.loadedUserId !== userId) return 0;
+    return this.totalDocs;
+  }
+
+  getAvgDocLength(userId: string): number {
+    if (this.loadedUserId !== userId) return 0;
+    return this.avgDocLength;
   }
 
   private tokenCount(text: string): number {

@@ -6,11 +6,23 @@ import { chromium } from 'playwright-extra';
 import stealth from 'puppeteer-extra-plugin-stealth';
 chromium.use(stealth());
 import crypto from 'crypto';
-import type { Document, PageClassification } from '@tse/shared';
+import type { Document, PageClassification, CrawlFailureReason, CrawlFailure } from '@tse/shared';
+
+const QUALITY_MIN_LENGTH = 200;
+const MAX_RETRIES = 3;
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
+const ADAPTIVE_DELAY_MIN = 500;
+const ADAPTIVE_DELAY_MAX = 30000;
+const SUCCESS_THRESHOLD_FOR_DELAY_REDUCE = 5;
+
+const TRANSIENT_REASONS: CrawlFailureReason[] = ['network', 'timeout', 'blocked-by-cdn'];
+const TRANSIENT_STATUS_CODES = [429, 503, 502, 504];
 
 class DomainCrawlState {
   lastRequestTime = 0;
   robotsCache: { allowed: boolean; expiresAt: number } | null = null;
+  currentDelay = 500;
+  consecutiveSuccesses = 0;
 }
 
 let browserInstance: any = null;
@@ -27,39 +39,170 @@ export class Crawler {
   private domainStates = new Map<string, DomainCrawlState>();
   private politenessDelayMs = 500;
 
-  async crawl(url: string, forceBrowser = false): Promise<{ doc: Document | null; links: string[]; classification: PageClassification; structuredData: any; rawHtml: string }> {
-    try {
-      const urlObj = new URL(url);
-      const domain = urlObj.hostname;
-      const state = this.getOrCreateState(domain);
+  async crawl(url: string, forceBrowser = false): Promise<{ doc: Document | null; links: string[]; classification: PageClassification; structuredData: any; rawHtml: string; failure?: CrawlFailure }> {
+    const urlObj = new URL(url);
+    const domain = urlObj.hostname;
+    const state = this.getOrCreateState(domain);
 
-      if (!(await this.canCrawl(url, domain, state))) {
-        return { doc: null, links: [], classification: 'General', structuredData: null, rawHtml: '' };
+    const robotsAllowed = await this.canCrawl(url, domain, state);
+    if (!robotsAllowed) {
+      return {
+        doc: null, links: [], classification: 'General', structuredData: null, rawHtml: '',
+        failure: { url, reason: 'robots-denied', retryCount: 0, timestamp: Date.now(), domain }
+      };
+    }
+
+    await this.enforcePoliteness(state);
+
+    let lastError: any = null;
+    let lastStatusCode: number | undefined;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const delay = RETRY_DELAYS_MS[attempt - 1] || RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1];
+        await new Promise(r => setTimeout(r, delay));
+        await this.enforcePoliteness(state);
       }
 
-      await this.enforcePoliteness(state);
+      try {
+        let result: { doc: Document | null; links: string[]; classification: PageClassification; structuredData: any; rawHtml: string; statusCode?: number };
 
-      if (forceBrowser) {
-        return await this.crawlWithBrowser(url, state);
-      }
+        if (forceBrowser) {
+          result = await this.crawlWithBrowser(url, state);
+        } else {
+          result = await this.crawlWithAxios(url, urlObj);
+        }
 
-      return await this.crawlWithAxios(url, urlObj);
-    } catch (error: any) {
-      // If Axios fails due to Cloudflare or bot protection, fallback to the browser
-      if (!forceBrowser && error.isAxiosError && (error.response?.status === 403 || error.response?.status === 503)) {
-        try {
-          const urlObj = new URL(url);
-          const state = this.getOrCreateState(urlObj.hostname);
-          return await this.crawlWithBrowser(url, state);
-        } catch (browserError) {
-          return { doc: null, links: [], classification: 'General', structuredData: null, rawHtml: '' };
+        if (result.doc) {
+          const quality = this.classifyContentQuality(result.doc.content);
+          if (quality === 'too-short') {
+            return {
+              ...result,
+              doc: null,
+              failure: { url, reason: 'content-too-short', retryCount: attempt, timestamp: Date.now(), domain, statusCode: result.statusCode }
+            };
+          }
+          if (quality === 'empty') {
+            return {
+              ...result,
+              doc: null,
+              failure: { url, reason: 'empty-content', retryCount: attempt, timestamp: Date.now(), domain, statusCode: result.statusCode }
+            };
+          }
+          state.consecutiveSuccesses++;
+          this.adjustDelayAfterSuccess(state);
+          return result;
+        }
+
+        if (result.statusCode && TRANSIENT_STATUS_CODES.includes(result.statusCode)) {
+          lastStatusCode = result.statusCode;
+          if (result.statusCode === 429) this.adjustDelayAfter429(state);
+          continue;
+        }
+
+        if (!forceBrowser && (result.statusCode === 403 || result.statusCode === 503)) {
+          const browserResult = await this.crawlWithBrowser(url, state);
+          if (browserResult.doc) {
+            const browserQuality = this.classifyContentQuality(browserResult.doc.content);
+            if (browserQuality === 'too-short') {
+              return {
+                ...browserResult,
+                doc: null,
+                failure: { url, reason: 'content-too-short', retryCount: attempt, timestamp: Date.now(), domain }
+              };
+            }
+            state.consecutiveSuccesses++;
+            this.adjustDelayAfterSuccess(state);
+            return browserResult;
+          }
+        }
+
+        return { ...result, failure: { url, reason: this.classifyError(null, { status: result.statusCode }), retryCount: attempt, timestamp: Date.now(), domain, statusCode: result.statusCode } };
+
+      } catch (error: any) {
+        lastError = error;
+        lastStatusCode = error.response?.status;
+        const reason = this.classifyError(error);
+
+        if (!this.isTransientError(error, reason) || attempt === MAX_RETRIES) {
+          break;
         }
       }
-      return { doc: null, links: [], classification: 'General', structuredData: null, rawHtml: '' };
+    }
+
+    const finalReason = this.classifyError(lastError, { status: lastStatusCode });
+
+    if (!forceBrowser && TRANSIENT_REASONS.includes(finalReason)) {
+      try {
+        const browserResult = await this.crawlWithBrowser(url, state);
+        if (browserResult.doc) {
+          state.consecutiveSuccesses++;
+          this.adjustDelayAfterSuccess(state);
+          return browserResult;
+        }
+      } catch (browserError) {}
+    }
+
+    if (!forceBrowser) {
+      const readabilityResult = await this.crawlWithReadabilityFallback(url);
+      if (readabilityResult.doc) {
+        state.consecutiveSuccesses++;
+        this.adjustDelayAfterSuccess(state);
+        return readabilityResult;
+      }
+    }
+
+    return {
+      doc: null, links: [], classification: 'General', structuredData: null, rawHtml: '',
+      failure: { url, reason: finalReason, retryCount: MAX_RETRIES, timestamp: Date.now(), domain, statusCode: lastStatusCode }
+    };
+  }
+
+  private classifyError(error: any, response?: { status?: number }): CrawlFailureReason {
+    if (error === null && response?.status) {
+      const status = response.status;
+      if (status === 429 || status === 503 || status === 502 || status === 504) return 'blocked-by-cdn';
+      if (status === 403) return 'blocked-by-cdn';
+      if (status >= 400) return 'network';
+    }
+    if (!error) return 'network';
+    if (error.code === 'ENOTFOUND' || error.code === 'EAI_AGAIN') return 'dns-error';
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT' || error.type === 'time-out') return 'timeout';
+    if (error.code === 'DEPTH_ZERO_SELF_SIGNED_CERT' || error.code?.startsWith('CERT_') || error.code?.startsWith('SSL_')) return 'ssl-error';
+    if (error.code === 'ECONNREFUSED' || error.code === 'ECONNRESET' || error.code === 'EPIPE') return 'network';
+    if (error.response?.status === 429 || error.response?.status === 503) return 'blocked-by-cdn';
+    if (error.response?.status === 403) return 'blocked-by-cdn';
+    if (error.isAxiosError && !error.response) return 'network';
+    if (error instanceof SyntaxError || error.name === 'SyntaxError') return 'parse-error';
+    return 'network';
+  }
+
+  private classifyContentQuality(content: string): 'ok' | 'empty' | 'too-short' {
+    if (!content || content.length === 0) return 'empty';
+    if (content.length < QUALITY_MIN_LENGTH) return 'too-short';
+    return 'ok';
+  }
+
+  private isTransientError(error: any, reason?: CrawlFailureReason): boolean {
+    if (reason && TRANSIENT_REASONS.includes(reason)) return true;
+    if (error?.response?.status && TRANSIENT_STATUS_CODES.includes(error.response.status)) return true;
+    if (error?.code === 'ECONNABORTED' || error?.code === 'ETIMEDOUT') return true;
+    return false;
+  }
+
+  private adjustDelayAfter429(state: DomainCrawlState): void {
+    state.currentDelay = Math.min(state.currentDelay * 2, ADAPTIVE_DELAY_MAX);
+    state.consecutiveSuccesses = 0;
+  }
+
+  private adjustDelayAfterSuccess(state: DomainCrawlState): void {
+    if (state.consecutiveSuccesses >= SUCCESS_THRESHOLD_FOR_DELAY_REDUCE) {
+      state.currentDelay = Math.max(state.currentDelay / 2, ADAPTIVE_DELAY_MIN);
+      state.consecutiveSuccesses = 0;
     }
   }
 
-  private async crawlWithAxios(url: string, urlObj: URL): Promise<{ doc: Document | null; links: string[]; classification: PageClassification; structuredData: any; rawHtml: string }> {
+  private async crawlWithAxios(url: string, urlObj: URL): Promise<{ doc: Document | null; links: string[]; classification: PageClassification; structuredData: any; rawHtml: string; statusCode?: number }> {
     const response = await axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -71,7 +214,7 @@ export class Crawler {
       maxRedirects: 3,
     });
 
-    if (response.status !== 200) return { doc: null, links: [], classification: 'General', structuredData: null, rawHtml: '' };
+    if (response.status !== 200) return { doc: null, links: [], classification: 'General', structuredData: null, rawHtml: '', statusCode: response.status };
 
     const html = response.data;
     const $ = cheerio.load(html);
@@ -117,10 +260,11 @@ export class Crawler {
       classification,
       structuredData,
       rawHtml: html,
+      statusCode: 200,
     };
   }
 
-  private async crawlWithBrowser(url: string, state: DomainCrawlState): Promise<{ doc: Document | null; links: string[]; classification: PageClassification; structuredData: any; rawHtml: string }> {
+  private async crawlWithBrowser(url: string, state: DomainCrawlState): Promise<{ doc: Document | null; links: string[]; classification: PageClassification; structuredData: any; rawHtml: string; statusCode?: number }> {
     const browser = await getBrowser();
     const context = await browser.newContext({ userAgent: this.userAgent });
     const page = await context.newPage();
@@ -174,9 +318,46 @@ export class Crawler {
         classification,
         structuredData,
         rawHtml: html,
+        statusCode: 200,
       };
     } finally {
       await context.close();
+    }
+  }
+
+  private async crawlWithReadabilityFallback(url: string): Promise<{ doc: Document | null; links: string[]; classification: PageClassification; structuredData: any; rawHtml: string; statusCode?: number }> {
+    try {
+      const response = await axios.get(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        timeout: 10000,
+        maxRedirects: 3,
+      });
+      if (response.status !== 200 || !response.data) {
+        return { doc: null, links: [], classification: 'General', structuredData: null, rawHtml: '', statusCode: response.status };
+      }
+      const html = response.data;
+      const article = this.extractWithReadability(html, url);
+      if (!article || article.textContent.length < 50) {
+        return { doc: null, links: [], classification: 'General', structuredData: null, rawHtml: html, statusCode: 200 };
+      }
+      const title = article.title || url;
+      return {
+        doc: {
+          id: crypto.randomUUID(),
+          url,
+          title,
+          content: article.textContent.replace(/\s+/g, ' ').trim(),
+          timestamp: Date.now(),
+          classification: 'General',
+        },
+        links: [],
+        classification: 'General',
+        structuredData: null,
+        rawHtml: html,
+        statusCode: 200,
+      };
+    } catch {
+      return { doc: null, links: [], classification: 'General', structuredData: null, rawHtml: '' };
     }
   }
 
@@ -202,7 +383,7 @@ export class Crawler {
               if (typeof type === 'string') {
                 if (type.toLowerCase() === 'product') return 'Product';
                 if (['article', 'newsarticle', 'blogposting', 'techarticle'].includes(type.toLowerCase())) return 'Article';
-                if (['itemlist', 'offer目录', 'collectionpage'].includes(type.toLowerCase())) return 'Listing';
+                if (['itemlist', 'collectionpage'].includes(type.toLowerCase())) return 'Listing';
               }
               // Check nested @graph
               if (obj['@graph']) {
@@ -667,11 +848,11 @@ export class Crawler {
 
   private async enforcePoliteness(state: DomainCrawlState): Promise<void> {
     const now = Date.now();
-    const nextAllowedTime = state.lastRequestTime + this.politenessDelayMs;
-    
+    const nextAllowedTime = state.lastRequestTime + state.currentDelay;
+
     if (now < nextAllowedTime) {
       const delay = nextAllowedTime - now;
-      state.lastRequestTime = nextAllowedTime; 
+      state.lastRequestTime = nextAllowedTime;
       await new Promise(r => setTimeout(r, delay));
     } else {
       state.lastRequestTime = now;

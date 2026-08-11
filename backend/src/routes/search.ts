@@ -3,14 +3,30 @@ import natural from 'natural';
 import type { SearchResult, Document } from '@tse/shared';
 import { getSuggestion } from '../utils/spellcheck';
 import { parseQuery } from '../utils/queryParser';
-import { brain } from '../services/brain';
+import { brain, INSIGHT_PROVIDERS } from '../services/brain';
 import { indexCache } from '../services/indexCache';
 import * as storage from '../services/storage';
 
 const router = Router();
 const stemmer = natural.PorterStemmer;
 
+function makeSnippet(content: string, terms: string[]): string {
+  const lower = content.toLowerCase();
+  let idx = -1;
+  for (const t of terms) {
+    idx = lower.indexOf(t);
+    if (idx >= 0) break;
+  }
+  if (idx < 0) return content.replace(/\s+/g, ' ').substring(0, 200);
+  const start = Math.max(0, idx - 80);
+  const end = Math.min(content.length, start + 200);
+  const excerpt = content.substring(start, end).replace(/\s+/g, ' ').trim();
+  return (start > 0 ? '...' : '') + excerpt + (end < content.length ? '...' : '');
+}
+
 router.get('/', async (req, res) => {
+  const userId = req.userId!;
+  await indexCache.loadUser(userId);
   const rawQ = (req.query.q as string || '').replace(/[\x00-\x1F]/g, '').trim().slice(0, 200);
 
   if (!rawQ) {
@@ -28,7 +44,7 @@ router.get('/', async (req, res) => {
 
     const scores: Record<string, number> = {};
     for (const term of queryTerms) {
-      const weights = indexCache.getTermWeights(term);
+      const weights = indexCache.getTermWeights(userId, term);
       if (weights) {
         for (const [docId, weight] of weights) {
           scores[docId] = (scores[docId] || 0) + weight;
@@ -68,7 +84,7 @@ router.get('/', async (req, res) => {
         id: doc.id,
         url: doc.url,
         title: doc.title,
-        snippet: doc.content.substring(0, 200) + '...',
+        snippet: makeSnippet(doc.content, parsed.includeTerms),
         score: scores[docId]
       });
     }
@@ -78,7 +94,7 @@ router.get('/', async (req, res) => {
     let suggestion: string | undefined = undefined;
     if (results.length < 5 && queryTerms[0]) {
       const typo = queryTerms[0];
-      const vocab = [...indexCache.vocabulary];
+      const vocab = [...indexCache.getVocabulary(userId)];
       const corrected = getSuggestion(typo, vocab);
       if (corrected && corrected !== typo) {
         suggestion = corrected;
@@ -98,18 +114,22 @@ router.get('/', async (req, res) => {
       suggestion
     };
 
-    if (mode === 'meaningful' && results.length > 0) {
+    if (mode === 'insight' && results.length > 0) {
       const topDocs: Document[] = [];
       for (const r of results.slice(0, 3)) {
         const fullDoc = indexCache.getDoc(r.id);
         if (fullDoc) topDocs.push(fullDoc);
       }
 
-      const brainOutput = await brain.synthesizeSearch(rawQ, topDocs);
+      const brainOutput = await brain.synthesizeSearch(rawQ, topDocs, {
+        provider: req.header('x-insight-provider') || undefined,
+        model: req.header('x-insight-model') || undefined,
+        apiKey: req.header('x-insight-key') || undefined,
+      });
       response.brainOutput = brainOutput;
     }
 
-    storage.appendLog({
+    storage.appendLog(userId, {
       query: rawQ,
       resultCount: results.length,
       responseMs: response.timeMs,
@@ -125,12 +145,15 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/suggest', (req, res) => {
+  const userId = req.userId!;
   const prefix = (req.query.q as string || '').trim().toLowerCase().slice(0, 50);
-  if (!prefix) {
-    return res.json([]);
-  }
-  const suggestions = indexCache.getSuggestions(prefix, 10);
+  if (!prefix) return res.json([]);
+  const suggestions = indexCache.getSuggestions(userId, prefix, 10);
   return res.json(suggestions);
+});
+
+router.get('/insight/providers', (_req, res) => {
+  res.json(INSIGHT_PROVIDERS);
 });
 
 export default router;

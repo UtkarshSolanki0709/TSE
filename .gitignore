@@ -35,4 +35,7 @@ node_modules
 .agents
 skills-lock.json
 
-backend/.data/scraped
+backend/.data/
+.github
+.opencode
+openspec

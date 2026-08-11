@@ -14,9 +14,6 @@ export interface Document {
 /** term → { docId → tf-idf weight } */
 export type InvertedIndex = Record<string, Record<string, number>>;
 
-/** docId → { term → tf-idf weight } — for cosine similarity */
-export type TfIdfVectors = Record<string, Record<string, number>>;
-
 export type PageClassification = 'Product' | 'Article' | 'Listing' | 'General';
 
 export interface CrawlRequest {
@@ -25,6 +22,33 @@ export interface CrawlRequest {
 }
 
 export type CrawlStatus = 'queued' | 'crawling' | 'done' | 'error';
+
+export type CrawlFailureReason =
+  | 'network'
+  | 'blocked-by-cdn'
+  | 'empty-content'
+  | 'robots-denied'
+  | 'timeout'
+  | 'parse-error'
+  | 'content-too-short'
+  | 'dns-error'
+  | 'ssl-error';
+
+export interface CrawlFailure {
+  url: string;
+  reason: CrawlFailureReason;
+  statusCode?: number;
+  retryCount: number;
+  timestamp: number;
+  domain: string;
+}
+
+export interface CrawlFailureEvent {
+  url: string;
+  reason: CrawlFailureReason;
+  retryCount: number;
+  timestamp: number;
+}
 
 export interface CrawlProgress {
   status: CrawlStatus;
@@ -36,6 +60,8 @@ export interface CrawlProgress {
   activeUrl?: string;
   recentTerms: string[];
   startTime: number;
+  failures?: CrawlFailureEvent[];
+  failedCount?: number;
 }
 
 export interface CrawlResult {
@@ -47,7 +73,7 @@ export interface CrawlResult {
 
 // ─── Search ──────────────────────────────────────────────────────────────────
 
-export type SearchMode = 'keyword' | 'semantic' | 'hybrid' | 'meaningful';
+export type SearchMode = 'keyword' | 'semantic' | 'hybrid' | 'insight';
 
 export interface SearchAnalytics {
   query: string;
@@ -65,7 +91,7 @@ export interface SearchResult {
   id: string;
   url: string;
   title: string;
-  snippet: string; // Highlighted excerpt
+  snippet: string; // Query-relevant excerpt
   score: number;
 }
 

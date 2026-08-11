@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { crawler } from '../services/crawler';
 import { indexer } from '../services/indexer';
 import * as storage from '../services/storage';
+import { indexCache } from '../services/indexCache';
 import { Server } from 'socket.io';
-import type { CrawlProgress } from '@tse/shared';
+import type { CrawlProgress, CrawlFailureEvent } from '@tse/shared';
 import pLimit from 'p-limit';
 import crypto from 'crypto';
 
@@ -31,10 +32,8 @@ const emitProgress = (progress: CrawlProgress) => {
   if (io) io.emit('crawl-progress', progress);
 };
 
-/**
- * Trigger a crawl for a specific URL
- */
 router.post('/', async (req, res) => {
+  const userId = req.userId!;
   const parsed = crawlSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() });
@@ -43,14 +42,23 @@ router.post('/', async (req, res) => {
   const { url, depth, browser } = parsed.data;
 
   try {
+    // Ensure user's index is loaded
+    await indexCache.loadUser(userId);
+
     const visited = new Set<string>();
     const queue = [{ url, currentDepth: 1 }];
     let docsCrawled = 0;
+    let failedCount = 0;
+    const failures: CrawlFailureEvent[] = [];
     const startTime = Date.now();
 
-    const MAX_PAGES = depth === 1 ? 1 : (depth === 2 ? 15 : 40); 
+    const MAX_PAGES = depth === 1 ? 1 : (depth === 2 ? 15 : 40);
 
-    emitProgress({
+    const emitProgressWithFailures = (progress: CrawlProgress) => {
+      emitProgress({ ...progress, failedCount, failures: progress.status === 'done' ? failures : undefined });
+    };
+
+    emitProgressWithFailures({
       status: 'crawling',
       url,
       docsCrawled: 0,
@@ -74,10 +82,11 @@ router.post('/', async (req, res) => {
         if (visited.has(currentUrl)) return;
         visited.add(currentUrl);
 
-        const { doc, links, classification, structuredData, rawHtml } = await crawler.crawl(currentUrl, browser);
+        const crawlResult = await crawler.crawl(currentUrl, browser);
+        const { doc, links, classification, structuredData, rawHtml, failure } = crawlResult;
 
         if (doc) {
-          await indexer.indexDocument(doc);
+          await indexer.indexDocument(userId, doc);
           docsCrawled++;
 
           try {
@@ -97,7 +106,7 @@ router.post('/', async (req, res) => {
 
           const sampleTerms = doc.content.split(/\s+/).slice(10, 15).filter(t => t.length > 3);
 
-          emitProgress({
+          emitProgressWithFailures({
             status: 'crawling',
             url,
             docsCrawled,
@@ -117,7 +126,19 @@ router.post('/', async (req, res) => {
             });
           }
         } else {
-          console.warn(`Failed to crawl: ${currentUrl}`);
+          failedCount++;
+          if (failure) {
+            await storage.recordCrawlFailure(userId, failure);
+            const failureEvent: CrawlFailureEvent = {
+              url: failure.url,
+              reason: failure.reason,
+              retryCount: failure.retryCount,
+              timestamp: failure.timestamp,
+            };
+            failures.push(failureEvent);
+            if (io) io.emit('crawl-failure', failureEvent);
+          }
+          console.warn(`Failed to crawl: ${currentUrl} — reason: ${failure?.reason ?? 'unknown'}`);
         }
       })));
     }
@@ -130,13 +151,15 @@ router.post('/', async (req, res) => {
       currentLevel: depth,
       maxDepth: depth,
       recentTerms: [],
-      startTime
+      startTime,
+      failedCount,
+      failures,
     };
     emitProgress(finalProgress);
 
     return res.status(200).json({
-      message: `Successfully indexed ${docsCrawled} pages`,
-      result: { url, status: 'done', docsCrawled }
+      message: `Successfully indexed ${docsCrawled} pages${failedCount > 0 ? `, ${failedCount} failed` : ''}`,
+      result: { url, status: 'done', docsCrawled, failedCount, failures }
     });
   } catch (error) {
     console.error('Crawl route error:', error);
@@ -144,10 +167,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-/**
- * Direct index from extension
- */
 router.post('/direct', async (req, res) => {
+  const userId = req.userId!;
   const parsed = directSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() });
@@ -156,6 +177,8 @@ router.post('/direct', async (req, res) => {
   const { url, title, content } = parsed.data;
 
   try {
+    await indexCache.loadUser(userId);
+
     const doc = {
       id: crypto.randomUUID(),
       url,
@@ -164,7 +187,7 @@ router.post('/direct', async (req, res) => {
       timestamp: Date.now()
     };
 
-    await indexer.indexDocument(doc);
+    await indexer.indexDocument(userId, doc);
 
     return res.status(200).json({
       message: 'Successfully indexed page from extension',
