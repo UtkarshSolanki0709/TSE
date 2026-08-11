@@ -91,7 +91,13 @@ const frontendDistPath = path.resolve(__dirname, '..', '..', 'frontend', 'dist')
 if (fs.existsSync(frontendDistPath)) {
   app.use(express.static(frontendDistPath));
   app.use((req, res, next) => {
-    if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/health') && !req.path.startsWith('/socket.io')) {
+    if (
+      req.method === 'GET' &&
+      !req.path.startsWith('/api') &&
+      !req.path.startsWith('/health') &&
+      !req.path.startsWith('/socket.io') &&
+      !path.extname(req.path)
+    ) {
       return res.sendFile(path.join(frontendDistPath, 'index.html'));
     }
     next();
