@@ -5,7 +5,8 @@ async function exec(rawSql: string): Promise<void> {
   const db = getDb();
   const mode = getMode();
   if (mode === 'cloud') {
-    await db.execute(sql.raw(rawSql));
+    const pgSql = rawSql.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+    await db.execute(sql.raw(pgSql));
   } else {
     // better-sqlite3 uses run() for raw SQL
     db.run(rawSql);

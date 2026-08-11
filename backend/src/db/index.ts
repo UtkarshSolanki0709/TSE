@@ -20,7 +20,11 @@ export function getDb(): DB {
   _mode = process.env.MODE || 'local';
 
   if (_mode === 'cloud') {
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    const sslNeeded = Boolean(process.env.DATABASE_URL?.includes('render.com') || process.env.DATABASE_URL?.includes('sslmode') || process.env.NODE_ENV === 'production');
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: sslNeeded ? { rejectUnauthorized: false } : undefined,
+    });
     _db = pgDrizzle(pool);
   } else {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
