@@ -14,9 +14,9 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: BASE_URL
-        value: https://tse-backend.onrender.com
+        value: https://tse-rdsb.onrender.com
       - key: CORS_ORIGIN
-        sync: false
+        value: https://tse-rdsb.onrender.com
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
