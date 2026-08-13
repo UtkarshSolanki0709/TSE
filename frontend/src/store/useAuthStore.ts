@@ -1,5 +1,17 @@
 import { create } from 'zustand';
 
+function resolveMode(): 'local' | 'cloud' {
+  const envMode = import.meta.env.VITE_MODE as 'local' | 'cloud' | undefined;
+  if (envMode === 'local' || envMode === 'cloud') return envMode;
+
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return 'local';
+  }
+
+  return 'cloud';
+}
+
 interface AuthState {
   token: string | null;
   user: { id: string; email: string; createdAt: number } | null;
@@ -13,7 +25,7 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   user: null,
-  mode: (import.meta.env.VITE_MODE as 'local' | 'cloud') || 'local',
+  mode: resolveMode(),
 
   setToken: (token) => {
     if (token) localStorage.setItem('tse_token', token);

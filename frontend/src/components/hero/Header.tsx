@@ -50,6 +50,12 @@ export function Header() {
               {label}
             </button>
           ))}
+          <button
+            onClick={() => navigate('/login')}
+            className="text-sm px-3 py-1.5 rounded-full border border-white/30 text-white hover:bg-white/10 transition-colors duration-200"
+          >
+            Login
+          </button>
         </nav>
 
         {/* Mobile menu toggle */}
@@ -80,6 +86,15 @@ export function Header() {
               {label}
             </button>
           ))}
+          <button
+            onClick={() => {
+              navigate('/login');
+              setMenuOpen(false);
+            }}
+            className="block w-full text-left rounded-xl px-4 py-3 text-sm text-white/90 hover:bg-white/10 transition-colors duration-200"
+          >
+            Login
+          </button>
         </nav>
       )}
     </header>

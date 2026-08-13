@@ -2,8 +2,6 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 
 // Tech-focused background video streams (Digital Data Network / Cyber Grid / Search Indexing)
 const TECH_VIDEO_SOURCES = [
-  'https://assets.mixkit.co/videos/preview/mixkit-network-lines-and-dots-in-blue-background-41551-large.mp4',
-  'https://cdn.coverr.co/videos/coverr-digital-network-lines-5654/1080p.mp4',
   'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260611_183632_c311af08-e4b7-458f-81e7-79847a49b3d3.mp4',
 ];
 
@@ -122,7 +120,11 @@ export function BoomerangVideoBg() {
   const handleVideoError = () => {
     if (currentVideoIndex < TECH_VIDEO_SOURCES.length - 1) {
       setCurrentVideoIndex((prev) => prev + 1);
+      return;
     }
+
+    // Fall back to particle background only when no playable source is available.
+    setCapturing(false);
   };
 
   useEffect(() => {

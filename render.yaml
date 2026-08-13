@@ -17,6 +17,10 @@ services:
         value: https://tse-rdsb.onrender.com
       - key: CORS_ORIGIN
         value: https://tse-rdsb.onrender.com
+      - key: VITE_MODE
+        value: cloud
+      - key: VITE_API_URL
+        value: /api
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
