@@ -12,6 +12,11 @@ function resolveMode(): 'local' | 'cloud' {
   return 'cloud';
 }
 
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('tse_token');
+}
+
 interface AuthState {
   token: string | null;
   user: { id: string; email: string; createdAt: number } | null;
@@ -23,7 +28,7 @@ interface AuthState {
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  token: null,
+  token: getStoredToken(),
   user: null,
   mode: resolveMode(),
 

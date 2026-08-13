@@ -17,7 +17,7 @@ export function BoomerangVideoBg() {
   const [capturing, setCapturing] = useState(true);
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
 
-  /* ── Interactive Cyber Data Node Network Layer ──────── */
+  
   useEffect(() => {
     const canvas = particleCanvasRef.current;
     if (!canvas) return;

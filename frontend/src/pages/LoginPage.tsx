@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import * as api from '../lib/api';
 
 export function LoginPage() {
+  const navigate = useNavigate();
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +21,7 @@ export function LoginPage() {
         ? await api.signup(email, password)
         : await api.login(email, password);
       setToken(res.token);
-      window.location.href = '/search';
+      navigate('/search', { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {

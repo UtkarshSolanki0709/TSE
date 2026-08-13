@@ -1,18 +1,20 @@
 import { useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 
 export function AuthCallback() {
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   const { setToken } = useAuthStore();
 
   useEffect(() => {
     const token = params.get('token');
     if (token) {
       setToken(token);
-      window.location.href = '/search';
+      navigate('/search', { replace: true });
     }
-  }, []);
+  }, [navigate, params, setToken]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950 text-white">
